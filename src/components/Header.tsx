@@ -29,13 +29,13 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold tracking-tight text-slate-900">
-                DSR<span className="text-emerald-600 italic font-medium">Converter</span>
+               Lexim DSR<span className="text-emerald-600 italic font-medium">Report</span>
               </h1>
               <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200/60 text-[10px] font-bold uppercase rounded tracking-wider">
                 v2.4 Active
               </span>
             </div>
-            <p className="text-xs text-slate-500 hidden sm:block">WhatsApp Daily Sales Report → Excel Sheet</p>
+            <p className="text-xs text-slate-500 hidden sm:block">DSR Daily Sales Report</p>
           </div>
         </div>
 
