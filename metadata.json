@@ -1,0 +1,6 @@
+{
+  "name": "WhatsApp DSR to Excel Converter",
+  "description": "Convert WhatsApp Daily Sales Reports from distributors into Excel sheets with dynamic brand extraction.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
