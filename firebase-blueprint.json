@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "DSRRecord": {
+      "title": "DSR Record",
+      "description": "Daily Sales Report record containing distributor, beat, sales call statistics and brand metrics.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique record ID",
+          "maxLength": 128
+        },
+        "date": {
+          "type": "string",
+          "description": "DSR date string (YYYY-MM-DD or DD-MM-YYYY)",
+          "maxLength": 64
+        },
+        "day": {
+          "type": "string",
+          "description": "Day of the week",
+          "maxLength": 32
+        },
+        "dsrName": {
+          "type": "string",
+          "description": "DSR Representative Name",
+          "maxLength": 128
+        },
+        "distributorName": {
+          "type": "string",
+          "description": "Distributor Name",
+          "maxLength": 256
+        },
+        "beat": {
+          "type": "string",
+          "description": "Route or beat area",
+          "maxLength": 256
+        },
+        "totalOutlet": {
+          "type": "number",
+          "description": "Total outlet count"
+        },
+        "totalCall": {
+          "type": "number",
+          "description": "Total sales calls made"
+        },
+        "totalProductiveCall": {
+          "type": "number",
+          "description": "Total productive calls"
+        },
+        "totalSalesValue": {
+          "type": "number",
+          "description": "Total sales revenue in NPR"
+        },
+        "brands": {
+          "type": "object",
+          "description": "Map of brand names to sales and productive call metrics"
+        },
+        "rawText": {
+          "type": "string",
+          "description": "Original raw pasted WhatsApp text",
+          "maxLength": 5000
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp in milliseconds when created"
+        }
+      },
+      "required": ["date", "distributorName", "beat", "totalSalesValue"]
+    }
+  },
+  "firestore": {
+    "/dsrRecords/{recordId}": {
+      "schema": "DSRRecord",
+      "description": "Collection of all Daily Sales Report entries synchronized across all clients"
+    }
+  }
+}

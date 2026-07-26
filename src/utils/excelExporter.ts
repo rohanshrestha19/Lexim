@@ -11,7 +11,7 @@ export function exportToExcel(records: DSRRecord[], filenamePrefix: string = 'Wh
   // 1. Gather all unique brands dynamically
   const uniqueBrands = getAllUniqueBrands(records);
 
-  // 2. Build headers list
+  // 2. Build headers list matching UI table & Google Sheets
   const headers: string[] = [
     'Date',
     'Day',
@@ -77,11 +77,27 @@ export function exportToExcel(records: DSRRecord[], filenamePrefix: string = 'Wh
   // 5. Generate worksheet
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
 
+  // Apply number formatting (#,##0) to numeric cells for clean Excel formatting
+  if (worksheet['!ref']) {
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+      for (let C = 5; C <= range.e.c; ++C) {
+        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+        if (worksheet[cellAddress]) {
+          worksheet[cellAddress].z = '#,##0';
+        }
+      }
+    }
+  }
+
   // Auto-size columns nicely
   const colWidths = headers.map((header, colIndex) => {
     let maxLen = header.length;
     rows.forEach((r) => {
-      const valStr = String(r[colIndex] ?? '');
+      const rawVal = r[colIndex];
+      const valStr = typeof rawVal === 'number'
+        ? rawVal.toLocaleString('en-IN')
+        : String(rawVal ?? '');
       if (valStr.length > maxLen) {
         maxLen = valStr.length;
       }
@@ -102,3 +118,4 @@ export function exportToExcel(records: DSRRecord[], filenamePrefix: string = 'Wh
   // Write and download file
   XLSX.writeFile(workbook, fullFilename);
 }
+

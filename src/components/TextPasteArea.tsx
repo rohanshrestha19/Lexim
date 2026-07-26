@@ -1,13 +1,21 @@
 import React, { useState, useMemo } from 'react';
-import { PlusCircle, Clipboard, Trash2, HelpCircle, CheckCircle2, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { PlusCircle, Clipboard, Trash2, HelpCircle, CheckCircle2, ChevronDown, ChevronUp, Sparkles, FileSpreadsheet, Upload } from 'lucide-react';
 import { splitMessages } from '../utils/dsrParser';
 import { SAMPLE_DSR_MESSAGES } from '../utils/localStorage';
 
 interface TextPasteAreaProps {
   onAddRecords: (pastedText: string) => void;
+  isClientViewMode?: boolean;
+  onSwitchToAdmin?: () => void;
+  onOpenExcelImport?: () => void;
 }
 
-export const TextPasteArea: React.FC<TextPasteAreaProps> = ({ onAddRecords }) => {
+export const TextPasteArea: React.FC<TextPasteAreaProps> = ({
+  onAddRecords,
+  isClientViewMode = false,
+  onSwitchToAdmin,
+  onOpenExcelImport,
+}) => {
   const [inputText, setInputText] = useState('');
   const [showFormatGuide, setShowFormatGuide] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
@@ -18,6 +26,39 @@ export const TextPasteArea: React.FC<TextPasteAreaProps> = ({ onAddRecords }) =>
     if (!inputText.trim()) return 0;
     return splitMessages(inputText).length;
   }, [inputText]);
+
+  if (isClientViewMode) {
+    return (
+      <div className="bg-sky-50/70 border border-sky-200/80 rounded-2xl p-5 shadow-2xs text-slate-800">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 bg-sky-100 rounded-xl text-sky-700 shrink-0 mt-0.5">
+              <Sparkles className="w-5 h-5 text-sky-600" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-slate-900">Client Visualization & Reporting Mode</h2>
+                <span className="px-2 py-0.5 bg-sky-200/80 text-sky-900 text-[10px] font-bold rounded uppercase">
+                  Read-Only View
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1">
+                You are currently viewing live synchronized DSR metrics, distributor performance analytics, and report tables.
+              </p>
+            </div>
+          </div>
+          {onSwitchToAdmin && (
+            <button
+              onClick={onSwitchToAdmin}
+              className="px-4 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition-all cursor-pointer shrink-0 shadow-xs active:scale-95"
+            >
+              Switch to Admin / Full Edit Access
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,8 +97,19 @@ export const TextPasteArea: React.FC<TextPasteAreaProps> = ({ onAddRecords }) =>
           </p>
         </div>
 
-        {/* Action Controls for Samples & Format */}
+        {/* Action Controls for Samples, Excel Upload & Format */}
         <div className="flex items-center gap-2 flex-wrap text-xs">
+          {onOpenExcelImport && (
+            <button
+              type="button"
+              onClick={onOpenExcelImport}
+              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 rounded-lg flex items-center gap-1.5 font-bold transition-all cursor-pointer shadow-2xs"
+            >
+              <Upload className="w-3.5 h-3.5 text-emerald-600" />
+              Upload Excel File
+            </button>
+          )}
+
           <div className="relative group">
             <button
               type="button"

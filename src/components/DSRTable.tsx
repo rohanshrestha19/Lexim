@@ -57,29 +57,38 @@ interface DSRTableProps {
   records: DSRRecord[];
   onEditRecord: (record: DSRRecord) => void;
   onDeleteRecord: (id: string) => void;
+  onBulkDeleteRecords?: (ids: string[]) => void;
   onViewRawText: (record: DSRRecord) => void;
   onAddManualRecord: () => void;
   onDownloadExcel: () => void;
   onFilteredRecordsChange?: (filtered: DSRRecord[]) => void;
   selectedDistributorFilter?: string;
   onDistributorFilterChange?: (distributor: string) => void;
+  isClientViewMode?: boolean;
 }
 
 export const DSRTable: React.FC<DSRTableProps> = ({
   records,
   onEditRecord,
   onDeleteRecord,
+  onBulkDeleteRecords,
   onViewRawText,
   onAddManualRecord,
   onDownloadExcel,
   onFilteredRecordsChange,
   selectedDistributorFilter: controlledDistributorFilter,
   onDistributorFilterChange,
+  isClientViewMode = false,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState<string>('ALL');
   const [selectedDsrFilter, setSelectedDsrFilter] = useState<string>('ALL');
   const [internalDistributorFilter, setInternalDistributorFilter] = useState<string>('ALL');
+
+  // Bulk Selection State
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const headerCheckboxRef = React.useRef<HTMLInputElement>(null);
 
   const selectedDistributorFilter = controlledDistributorFilter !== undefined ? controlledDistributorFilter : internalDistributorFilter;
 
@@ -234,6 +243,64 @@ export const DSRTable: React.FC<DSRTableProps> = ({
     }
   };
 
+  // Checkbox Selection Logic
+  const filteredRecordIds = useMemo(() => filteredRecords.map((r) => r.id), [filteredRecords]);
+
+  const isAllSelected = useMemo(() => {
+    if (filteredRecordIds.length === 0) return false;
+    return filteredRecordIds.every((id) => selectedIds.has(id));
+  }, [filteredRecordIds, selectedIds]);
+
+  const isSomeSelected = useMemo(() => {
+    if (isAllSelected || filteredRecordIds.length === 0) return false;
+    return filteredRecordIds.some((id) => selectedIds.has(id));
+  }, [filteredRecordIds, selectedIds, isAllSelected]);
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = isSomeSelected;
+    }
+  }, [isSomeSelected]);
+
+  const handleToggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        filteredRecordIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        filteredRecordIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  };
+
+  const handleToggleSelectRow = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleConfirmBulkDelete = () => {
+    const idsToDelete = Array.from(selectedIds);
+    if (onBulkDeleteRecords) {
+      onBulkDeleteRecords(idsToDelete);
+    } else {
+      idsToDelete.forEach((id) => onDeleteRecord(id));
+    }
+    setSelectedIds(new Set());
+    setShowBulkDeleteConfirm(false);
+  };
+
   if (records.length === 0) {
     return (
       <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center my-6 shadow-xs">
@@ -244,13 +311,15 @@ export const DSRTable: React.FC<DSRTableProps> = ({
         <p className="text-xs text-slate-500 max-w-md mx-auto mb-6">
           Paste distributor WhatsApp Daily Sales Reports above and click "Append to Sheet". They will immediately populate rows here with dynamic brand columns!
         </p>
-        <button
-          onClick={onAddManualRecord}
-          className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <Plus className="w-4 h-4 text-emerald-600" />
-          Add Row Manually
-        </button>
+        {!isClientViewMode && (
+          <button
+            onClick={onAddManualRecord}
+            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4 text-emerald-600" />
+            Add Row Manually
+          </button>
+        )}
       </div>
     );
   }
@@ -273,6 +342,29 @@ export const DSRTable: React.FC<DSRTableProps> = ({
 
         {/* Right: Date Range Picker + Distributor Filter + Brand Filter + Add Manual + Download */}
         <div className="flex items-center gap-2 flex-wrap text-xs">
+          {/* Bulk Delete Button when items selected */}
+          {selectedIds.size > 0 && !isClientViewMode && (
+            <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl animate-fadeIn shadow-2xs">
+              <span className="text-xs font-bold text-rose-800">
+                {selectedIds.size} row{selectedIds.size > 1 ? 's' : ''} selected
+              </span>
+              <button
+                onClick={() => setShowBulkDeleteConfirm(true)}
+                className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
+                title="Delete all selected records"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Bulk Delete
+              </button>
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                className="p-1 text-rose-500 hover:text-rose-800 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
+                title="Clear selection"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Date Range Picker UI */}
           <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-xl shadow-2xs">
             <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -385,14 +477,16 @@ export const DSRTable: React.FC<DSRTableProps> = ({
             </button>
           )}
 
-          {/* Add Manual Row */}
-          <button
-            onClick={onAddManualRecord}
-            className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5 text-emerald-600" />
-            Add Row
-          </button>
+          {/* Add Manual Row (Admin Only) */}
+          {!isClientViewMode && (
+            <button
+              onClick={onAddManualRecord}
+              className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 text-emerald-600" />
+              Add Row
+            </button>
+          )}
 
           {/* Download Excel */}
           <button
@@ -430,6 +524,18 @@ export const DSRTable: React.FC<DSRTableProps> = ({
           {/* Table Header */}
           <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[11px] sticky top-0 z-20 shadow-xs">
             <tr>
+              {!isClientViewMode && (
+                <th className="py-3 px-3 border-b border-slate-200 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    ref={headerCheckboxRef}
+                    checked={isAllSelected}
+                    onChange={handleToggleSelectAll}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                    title={isAllSelected ? 'Deselect All' : 'Select All'}
+                  />
+                </th>
+              )}
               <th className="py-3 px-3 border-b border-slate-200 w-10 text-center">#</th>
               
               {/* Fixed Columns */}
@@ -492,7 +598,11 @@ export const DSRTable: React.FC<DSRTableProps> = ({
                 );
               })}
 
-              <th className="py-3 px-3 border-b border-slate-200 text-center min-w-[100px]">Actions</th>
+              {!isClientViewMode ? (
+                <th className="py-3 px-3 border-b border-slate-200 text-center min-w-[100px]">Actions</th>
+              ) : (
+                <th className="py-3 px-3 border-b border-slate-200 text-center min-w-[60px]">Text</th>
+              )}
             </tr>
           </thead>
 
@@ -500,19 +610,32 @@ export const DSRTable: React.FC<DSRTableProps> = ({
           <tbody className="divide-y divide-slate-100 text-slate-700">
             {filteredRecords.length === 0 ? (
               <tr>
-                <td colSpan={10 + uniqueBrands.length} className="py-8 text-center text-slate-400 italic">
+                <td colSpan={(isClientViewMode ? 10 : 11) + uniqueBrands.length} className="py-8 text-center text-slate-400 italic">
                   No records match your search criteria.
                 </td>
               </tr>
             ) : (
               filteredRecords.map((record, index) => {
                 const hasWarnings = record.parseWarnings && record.parseWarnings.length > 0;
+                const isSelected = selectedIds.has(record.id);
 
                 return (
                   <tr
                     key={record.id}
-                    className="hover:bg-slate-50 transition-colors group"
+                    className={`hover:bg-slate-50 transition-colors group ${
+                      isSelected ? 'bg-emerald-50/60 font-medium' : ''
+                    }`}
                   >
+                    {!isClientViewMode && (
+                      <td className="py-3 px-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectRow(record.id)}
+                          className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+                        />
+                      </td>
+                    )}
                     <td className="py-3 px-3 text-slate-400 text-center font-mono text-[11px]">{index + 1}</td>
                     <td className="py-3 px-3 whitespace-nowrap font-mono text-xs text-slate-600">{record.date}</td>
                     <td className="py-3 px-3 whitespace-nowrap text-slate-500">{record.day || '-'}</td>
@@ -560,25 +683,29 @@ export const DSRTable: React.FC<DSRTableProps> = ({
                       <div className="flex items-center justify-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => onViewRawText(record)}
-                          className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-sky-600 rounded-lg transition-colors"
+                          className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-sky-600 rounded-lg transition-colors cursor-pointer"
                           title="View Original Text"
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          onClick={() => onEditRecord(record)}
-                          className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-emerald-600 rounded-lg transition-colors"
-                          title="Edit Row"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => onDeleteRecord(record.id)}
-                          className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
-                          title="Delete Row"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {!isClientViewMode && (
+                          <>
+                            <button
+                              onClick={() => onEditRecord(record)}
+                              className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-emerald-600 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Row"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => onDeleteRecord(record.id)}
+                              className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Row"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -591,6 +718,7 @@ export const DSRTable: React.FC<DSRTableProps> = ({
           {filteredRecords.length > 0 && (
             <tfoot className="bg-slate-100 border-t-2 border-emerald-500 font-bold text-xs sticky bottom-0 z-20 shadow-md text-slate-900">
               <tr>
+                {!isClientViewMode && <td className="py-3.5 px-3"></td>}
                 <td className="py-3.5 px-3 text-center text-emerald-700 font-sans">Σ</td>
                 <td className="py-3.5 px-3 text-slate-900 font-sans uppercase tracking-wider text-[11px]" colSpan={4}>
                   TOTALS ({filteredRecords.length} Rows)
@@ -616,6 +744,41 @@ export const DSRTable: React.FC<DSRTableProps> = ({
           )}
         </table>
       </div>
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="p-3 bg-rose-100 rounded-xl shrink-0">
+                <Trash2 className="w-6 h-6 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Delete {selectedIds.size} Selected Record{selectedIds.size > 1 ? 's' : ''}?
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Are you sure you want to delete these {selectedIds.size} selected DSR records? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => setShowBulkDeleteConfirm(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmBulkDelete}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors shadow-md shadow-rose-200 cursor-pointer"
+              >
+                Yes, Delete ({selectedIds.size})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

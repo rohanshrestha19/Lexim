@@ -3,7 +3,15 @@ import { DSRRecord } from './types';
 import { parseDSRText, getAllUniqueBrands } from './utils/dsrParser';
 import { exportToExcel } from './utils/excelExporter';
 import { loadStoredRecords, saveStoredRecords, clearStoredRecords } from './utils/localStorage';
-import { AlertTriangle, Trash2, X } from 'lucide-react';
+import {
+  subscribeDSRRecords,
+  saveDSRRecordToDB,
+  batchSaveDSRRecordsToDB,
+  deleteDSRRecordFromDB,
+  bulkDeleteDSRRecordsFromDB,
+  clearAllDSRRecordsInDB,
+} from './lib/firestoreService';
+import { AlertTriangle, Trash2 } from 'lucide-react';
 
 import { Header } from './components/Header';
 import { TextPasteArea } from './components/TextPasteArea';
@@ -14,6 +22,8 @@ import { EditRowModal } from './components/EditRowModal';
 import { RawTextModal } from './components/RawTextModal';
 import { HelpModal } from './components/HelpModal';
 import { GoogleSheetsModal } from './components/GoogleSheetsModal';
+import { ExcelImportModal } from './components/ExcelImportModal';
+import { AdminPasswordModal } from './components/AdminPasswordModal';
 
 export default function App() {
   const [records, setRecords] = useState<DSRRecord[]>(() => loadStoredRecords());
@@ -23,21 +33,83 @@ export default function App() {
   const [viewingRawTextRecord, setViewingRawTextRecord] = useState<DSRRecord | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showGoogleSheetsModal, setShowGoogleSheetsModal] = useState(false);
+  const [showExcelImportModal, setShowExcelImportModal] = useState(false);
+  const [showAdminPasswordModal, setShowAdminPasswordModal] = useState(false);
 
   const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
   const [showClearModal, setShowClearModal] = useState(false);
 
-  // Sync to localStorage whenever records state updates
+  // Client-Side Only View vs Admin Access state (Reads ?mode=client or ?view=client from URL)
+  const [isClientViewMode, setIsClientViewMode] = useState<boolean>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode') || params.get('view') || params.get('role');
+    return mode === 'client';
+  });
+  const [isDbConnected, setIsDbConnected] = useState<boolean>(false);
+
+  // Switch mode with admin passcode protection
+  const handleToggleClientViewMode = () => {
+    if (isClientViewMode) {
+      // Require Admin PIN to switch from Client mode to Admin mode
+      setShowAdminPasswordModal(true);
+    } else {
+      // Switch back to Client Read-Only mode
+      setIsClientViewMode(true);
+      const url = new URL(window.location.href);
+      url.searchParams.set('mode', 'client');
+      window.history.replaceState({}, '', url.toString());
+    }
+  };
+
+  const handleAdminUnlockSuccess = () => {
+    setIsClientViewMode(false);
+    setShowAdminPasswordModal(false);
+    const url = new URL(window.location.href);
+    url.searchParams.set('mode', 'admin');
+    window.history.replaceState({}, '', url.toString());
+  };
+
+  // Firestore Subscription & Auto Seed
+  useEffect(() => {
+    let initialSyncDone = false;
+
+    const unsubscribe = subscribeDSRRecords(
+      (dbRecords) => {
+        setIsDbConnected(true);
+        if (dbRecords.length > 0) {
+          setRecords(dbRecords);
+        } else if (!initialSyncDone) {
+          initialSyncDone = true;
+          // Seed database with initial local/sample records if DB is empty
+          const localRecords = loadStoredRecords();
+          if (localRecords.length > 0) {
+            batchSaveDSRRecordsToDB(localRecords).catch(console.error);
+          }
+        }
+      },
+      (err) => {
+        console.warn('Firestore offline fallback:', err);
+        setIsDbConnected(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  // Sync to localStorage as offline secondary backup
   useEffect(() => {
     saveStoredRecords(records);
     setFilteredRecords(records);
   }, [records]);
 
   // Handle adding new records from pasted WhatsApp text
-  const handleAddRecords = (pastedText: string) => {
+  const handleAddRecords = async (pastedText: string) => {
     const parseResult = parseDSRText(pastedText);
     if (parseResult.records.length > 0) {
+      // Optimistic update
       setRecords((prev) => [...prev, ...parseResult.records]);
+      // Persist to Cloud Database
+      await batchSaveDSRRecordsToDB(parseResult.records).catch(console.error);
     }
   };
 
@@ -62,7 +134,7 @@ export default function App() {
   };
 
   // Save updated record from Edit Modal
-  const handleSaveRecord = (updatedRecord: DSRRecord) => {
+  const handleSaveRecord = async (updatedRecord: DSRRecord) => {
     setRecords((prev) => {
       const exists = prev.some((r) => r.id === updatedRecord.id);
       if (exists) {
@@ -72,6 +144,7 @@ export default function App() {
       }
     });
     setEditingRecord(null);
+    await saveDSRRecordToDB(updatedRecord).catch(console.error);
   };
 
   // Trigger Delete confirmation modal
@@ -80,28 +153,54 @@ export default function App() {
   };
 
   // Confirm delete action
-  const confirmDeleteRecord = () => {
+  const confirmDeleteRecord = async () => {
     if (deletingRecordId) {
-      setRecords((prev) => prev.filter((r) => r.id !== deletingRecordId));
+      const targetId = deletingRecordId;
+      setRecords((prev) => prev.filter((r) => r.id !== targetId));
       setDeletingRecordId(null);
+      await deleteDSRRecordFromDB(targetId).catch(console.error);
     }
+  };
+
+  // Bulk delete records action
+  const handleBulkDeleteRecords = async (ids: string[]) => {
+    const idSet = new Set(ids);
+    setRecords((prev) => prev.filter((r) => !idSet.has(r.id)));
+    await bulkDeleteDSRRecordsFromDB(ids).catch(console.error);
   };
 
   // Clear all sheet data with modal confirmation
-  const handleConfirmClearSheet = () => {
+  const handleConfirmClearSheet = async () => {
     setRecords([]);
     clearStoredRecords();
     setShowClearModal(false);
+    await clearAllDSRRecordsInDB().catch(console.error);
   };
 
   // Handle Google Sheets Import callback
-  const handleImportGoogleSheetsRecords = (importedRecords: DSRRecord[], replaceExisting: boolean) => {
+  const handleImportGoogleSheetsRecords = async (importedRecords: DSRRecord[], replaceExisting: boolean) => {
     if (replaceExisting) {
+      await clearAllDSRRecordsInDB().catch(console.error);
       setRecords(importedRecords);
+      await batchSaveDSRRecordsToDB(importedRecords).catch(console.error);
     } else {
       setRecords((prev) => [...prev, ...importedRecords]);
+      await batchSaveDSRRecordsToDB(importedRecords).catch(console.error);
     }
     setShowGoogleSheetsModal(false);
+  };
+
+  // Handle Excel Sheet Import callback
+  const handleImportExcelRecords = async (importedRecords: DSRRecord[], replaceExisting: boolean) => {
+    if (replaceExisting) {
+      await clearAllDSRRecordsInDB().catch(console.error);
+      setRecords(importedRecords);
+      await batchSaveDSRRecordsToDB(importedRecords).catch(console.error);
+    } else {
+      setRecords((prev) => [...prev, ...importedRecords]);
+      await batchSaveDSRRecordsToDB(importedRecords).catch(console.error);
+    }
+    setShowExcelImportModal(false);
   };
 
   // Trigger Excel Export for active filtered records
@@ -118,7 +217,11 @@ export default function App() {
       <Header
         recordCount={records.length}
         brandCount={uniqueBrands.length}
+        isClientViewMode={isClientViewMode}
+        isDbConnected={isDbConnected}
+        onToggleClientViewMode={handleToggleClientViewMode}
         onDownloadExcel={handleDownloadExcel}
+        onOpenExcelImport={() => setShowExcelImportModal(true)}
         onClearSheet={() => setShowClearModal(true)}
         onOpenHelp={() => setShowHelpModal(true)}
         onOpenGoogleSheets={() => setShowGoogleSheetsModal(true)}
@@ -126,9 +229,14 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Top Section: Text Paste Area */}
+        {/* Top Section: Text Paste Area / Read-Only Client Banner */}
         <section>
-          <TextPasteArea onAddRecords={handleAddRecords} />
+          <TextPasteArea
+            onAddRecords={handleAddRecords}
+            isClientViewMode={isClientViewMode}
+            onSwitchToAdmin={() => setShowAdminPasswordModal(true)}
+            onOpenExcelImport={() => setShowExcelImportModal(true)}
+          />
         </section>
 
         {/* Middle Section: High-level Stats Overview (Synchronized with active filters) */}
@@ -156,10 +264,12 @@ export default function App() {
             onDistributorFilterChange={(dist) => setSelectedDistributorFilter(dist)}
             onEditRecord={(record) => setEditingRecord(record)}
             onDeleteRecord={handleDeleteRecord}
+            onBulkDeleteRecords={handleBulkDeleteRecords}
             onViewRawText={(record) => setViewingRawTextRecord(record)}
             onAddManualRecord={handleAddManualRecord}
             onDownloadExcel={handleDownloadExcel}
             onFilteredRecordsChange={(filtered) => setFilteredRecords(filtered)}
+            isClientViewMode={isClientViewMode}
           />
         </section>
       </main>
@@ -168,12 +278,14 @@ export default function App() {
       <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p className="font-medium text-slate-600">WhatsApp DSR → Excel Converter • Dynamic Brand Parsing Engine</p>
-          <p className="text-slate-400">Session data preserved in browser storage</p>
+          <p className="text-slate-400">
+            {isDbConnected ? 'Synced with Cloud Firestore Database' : 'Session data preserved in browser storage'}
+          </p>
         </div>
       </footer>
 
       {/* Edit Row Modal */}
-      {editingRecord && (
+      {editingRecord && !isClientViewMode && (
         <EditRowModal
           record={editingRecord}
           allRecords={records}
@@ -203,8 +315,25 @@ export default function App() {
         />
       )}
 
+      {/* Excel Import Modal */}
+      {showExcelImportModal && (
+        <ExcelImportModal
+          existingCount={records.length}
+          onImportRecords={handleImportExcelRecords}
+          onClose={() => setShowExcelImportModal(false)}
+        />
+      )}
+
+      {/* Admin Security Authentication PIN Modal */}
+      {showAdminPasswordModal && (
+        <AdminPasswordModal
+          onClose={() => setShowAdminPasswordModal(false)}
+          onSuccess={handleAdminUnlockSuccess}
+        />
+      )}
+
       {/* Delete Confirmation Modal */}
-      {deletingRecordId && (
+      {deletingRecordId && !isClientViewMode && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden p-6">
             <div className="flex items-center gap-3 text-rose-600 mb-3">
@@ -238,7 +367,7 @@ export default function App() {
       )}
 
       {/* Clear All Sheet Confirmation Modal */}
-      {showClearModal && (
+      {showClearModal && !isClientViewMode && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden p-6">
             <div className="flex items-center gap-3 text-rose-600 mb-3">
@@ -273,3 +402,4 @@ export default function App() {
     </div>
   );
 }
+

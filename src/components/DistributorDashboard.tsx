@@ -66,8 +66,6 @@ export const DistributorDashboard: React.FC<DistributorDashboardProps> = ({
   // Table Mode: 'standard' or 'breakdown' (Daily, Weekly, Monthly, Yearly side-by-side)
   const [tableMode, setTableMode] = useState<'standard' | 'breakdown'>('standard');
 
-  if (records.length === 0) return null;
-
   // Pre-process records with date details
   const recordsWithDate = useMemo(() => {
     return records.map((r) => ({
@@ -298,6 +296,8 @@ export const DistributorDashboard: React.FC<DistributorDashboardProps> = ({
     if (timeframe === 'yearly') return activeYearKey;
     return 'All Time';
   };
+
+  if (records.length === 0) return null;
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden my-6">
