@@ -2,15 +2,15 @@ import { DSRRecord } from '../types';
 
 const STORAGE_KEY = 'dsr_converter_records_v2';
 
-export function loadStoredRecords(): DSRRecord[] {
+export function loadStoredRecords(): DSRRecord[] | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
+    if (raw === null) return null;
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
     console.error('Failed to load records from localStorage', err);
-    return [];
+    return null;
   }
 }
 
@@ -24,7 +24,7 @@ export function saveStoredRecords(records: DSRRecord[]): void {
 
 export function clearStoredRecords(): void {
   try {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
   } catch (err) {
     console.error('Failed to clear records from localStorage', err);
   }

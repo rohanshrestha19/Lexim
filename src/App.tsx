@@ -28,7 +28,7 @@ import { AdminPasswordModal } from './components/AdminPasswordModal';
 export default function App() {
   const [records, setRecords] = useState<DSRRecord[]>(() => {
     const local = loadStoredRecords();
-    if (local.length > 0) return local;
+    if (local !== null) return local;
     return parseDSRText(SAMPLE_DSR_MESSAGES.join('\n\n-----\n\n')).records;
   });
   const [filteredRecords, setFilteredRecords] = useState<DSRRecord[]>(records);
@@ -87,9 +87,11 @@ export default function App() {
             initialSyncDone = true;
             // Check if local cache has stored records first
             const localRecords = loadStoredRecords();
-            if (localRecords.length > 0) {
+            if (localRecords !== null) {
               setRecords(localRecords);
-              batchSaveDSRRecordsToDB(localRecords).catch(console.error);
+              if (localRecords.length > 0) {
+                batchSaveDSRRecordsToDB(localRecords).catch(console.error);
+              }
             } else {
               // Parse default sample Lexim Nepal DSR records & seed directly to Cloud Firestore
               const sampleParsed = parseDSRText(SAMPLE_DSR_MESSAGES.join('\n\n-----\n\n'));
@@ -109,7 +111,7 @@ export default function App() {
         console.warn('Firestore offline fallback:', err);
         setIsDbConnected(false);
         const localRecords = loadStoredRecords();
-        if (localRecords.length > 0) {
+        if (localRecords !== null) {
           setRecords(localRecords);
         } else {
           const sampleParsed = parseDSRText(SAMPLE_DSR_MESSAGES.join('\n\n-----\n\n'));
