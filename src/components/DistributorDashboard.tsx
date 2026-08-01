@@ -224,8 +224,13 @@ export const DistributorDashboard: React.FC<DistributorDashboardProps> = ({
     // Calculate brand sales
     const brandSalesMap: Record<string, number> = {};
     Object.entries(r.brands || {}).forEach(([bKey, bVal]) => {
-      const metric = bVal as BrandMetric;
-      const bSales = Number(metric.salesValue) || 0;
+      let bSales = 0;
+      if (typeof bVal === 'number') {
+        bSales = isNaN(bVal) ? 0 : bVal;
+      } else if (bVal && typeof bVal === 'object') {
+        bSales = Number((bVal as any).salesValue) || 0;
+      }
+
       const lowerKey = bKey.toLowerCase();
 
       if (lowerKey.includes('panda')) {

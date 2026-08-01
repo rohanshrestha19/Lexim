@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DSRRecord } from './types';
 import { parseDSRText, getAllUniqueBrands } from './utils/dsrParser';
 import { exportToExcel } from './utils/excelExporter';
-import { loadStoredRecords, saveStoredRecords, clearStoredRecords } from './utils/localStorage';
+import { loadStoredRecords, saveStoredRecords, clearStoredRecords, SAMPLE_DSR_MESSAGES } from './utils/localStorage';
 import {
   subscribeDSRRecords,
   saveDSRRecordToDB,
@@ -26,7 +26,11 @@ import { ExcelImportModal } from './components/ExcelImportModal';
 import { AdminPasswordModal } from './components/AdminPasswordModal';
 
 export default function App() {
-  const [records, setRecords] = useState<DSRRecord[]>(() => loadStoredRecords());
+  const [records, setRecords] = useState<DSRRecord[]>(() => {
+    const local = loadStoredRecords();
+    if (local.length > 0) return local;
+    return parseDSRText(SAMPLE_DSR_MESSAGES.join('\n\n-----\n\n')).records;
+  });
   const [filteredRecords, setFilteredRecords] = useState<DSRRecord[]>(records);
   const [selectedDistributorFilter, setSelectedDistributorFilter] = useState<string>('ALL');
   const [editingRecord, setEditingRecord] = useState<DSRRecord | null>(null);
@@ -69,7 +73,7 @@ export default function App() {
     window.history.replaceState({}, '', url.toString());
   };
 
-  // Firestore Subscription & Auto Seed
+  // Firestore Subscription & Auto Seed to Cloud DB
   useEffect(() => {
     let initialSyncDone = false;
 
@@ -78,18 +82,39 @@ export default function App() {
         setIsDbConnected(true);
         if (dbRecords.length > 0) {
           setRecords(dbRecords);
-        } else if (!initialSyncDone) {
-          initialSyncDone = true;
-          // Seed database with initial local/sample records if DB is empty
-          const localRecords = loadStoredRecords();
-          if (localRecords.length > 0) {
-            batchSaveDSRRecordsToDB(localRecords).catch(console.error);
+        } else {
+          if (!initialSyncDone) {
+            initialSyncDone = true;
+            // Check if local cache has stored records first
+            const localRecords = loadStoredRecords();
+            if (localRecords.length > 0) {
+              setRecords(localRecords);
+              batchSaveDSRRecordsToDB(localRecords).catch(console.error);
+            } else {
+              // Parse default sample Lexim Nepal DSR records & seed directly to Cloud Firestore
+              const sampleParsed = parseDSRText(SAMPLE_DSR_MESSAGES.join('\n\n-----\n\n'));
+              if (sampleParsed.records.length > 0) {
+                setRecords(sampleParsed.records);
+                batchSaveDSRRecordsToDB(sampleParsed.records).catch(console.error);
+              } else {
+                setRecords([]);
+              }
+            }
+          } else {
+            setRecords([]);
           }
         }
       },
       (err) => {
         console.warn('Firestore offline fallback:', err);
         setIsDbConnected(false);
+        const localRecords = loadStoredRecords();
+        if (localRecords.length > 0) {
+          setRecords(localRecords);
+        } else {
+          const sampleParsed = parseDSRText(SAMPLE_DSR_MESSAGES.join('\n\n-----\n\n'));
+          setRecords(sampleParsed.records);
+        }
       }
     );
 
@@ -129,22 +154,28 @@ export default function App() {
       rawText: 'Manually added record',
       parseWarnings: [],
       createdAt: Date.now(),
+      isEdited: true,
     };
     setEditingRecord(newRecord);
   };
 
   // Save updated record from Edit Modal
   const handleSaveRecord = async (updatedRecord: DSRRecord) => {
+    const recordToSave: DSRRecord = {
+      ...updatedRecord,
+      isEdited: true,
+    };
+
     setRecords((prev) => {
-      const exists = prev.some((r) => r.id === updatedRecord.id);
+      const exists = prev.some((r) => r.id === recordToSave.id);
       if (exists) {
-        return prev.map((r) => (r.id === updatedRecord.id ? updatedRecord : r));
+        return prev.map((r) => (r.id === recordToSave.id ? recordToSave : r));
       } else {
-        return [...prev, updatedRecord];
+        return [recordToSave, ...prev];
       }
     });
     setEditingRecord(null);
-    await saveDSRRecordToDB(updatedRecord).catch(console.error);
+    await saveDSRRecordToDB(recordToSave).catch(console.error);
   };
 
   // Trigger Delete confirmation modal
@@ -268,6 +299,7 @@ export default function App() {
             onViewRawText={(record) => setViewingRawTextRecord(record)}
             onAddManualRecord={handleAddManualRecord}
             onDownloadExcel={handleDownloadExcel}
+            onClearSheet={() => setShowClearModal(true)}
             onFilteredRecordsChange={(filtered) => setFilteredRecords(filtered)}
             isClientViewMode={isClientViewMode}
           />

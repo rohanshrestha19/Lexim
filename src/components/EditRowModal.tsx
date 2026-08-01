@@ -38,13 +38,22 @@ export const EditRowModal: React.FC<EditRowModalProps> = ({
 
   const handleBrandChange = (brand: string, field: 'productiveCall' | 'salesValue', val: string) => {
     const num = parseFloat(val) || 0;
-    setBrands((prev) => ({
-      ...prev,
-      [brand]: {
-        productiveCall: field === 'productiveCall' ? num : prev[brand]?.productiveCall || 0,
-        salesValue: field === 'salesValue' ? num : prev[brand]?.salesValue || 0,
-      },
-    }));
+    setBrands((prev) => {
+      const updated = {
+        ...prev,
+        [brand]: {
+          productiveCall: field === 'productiveCall' ? num : prev[brand]?.productiveCall || 0,
+          salesValue: field === 'salesValue' ? num : prev[brand]?.salesValue || 0,
+        },
+      };
+
+      // Recalculate sum of brand sales values automatically
+      const sumBrands: number = Object.values(updated).reduce<number>((acc, b) => acc + (Number((b as any)?.salesValue) || 0), 0);
+      if (sumBrands > 0) {
+        setTotalSalesValue(sumBrands);
+      }
+      return updated;
+    });
   };
 
   const handleAddCustomBrand = () => {
@@ -82,6 +91,7 @@ export const EditRowModal: React.FC<EditRowModalProps> = ({
       totalProductiveCall: Number(totalProductiveCall) || 0,
       totalSalesValue: Number(totalSalesValue) || 0,
       brands,
+      isEdited: true,
     };
 
     onSave(updated);

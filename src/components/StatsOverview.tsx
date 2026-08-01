@@ -31,11 +31,14 @@ export const StatsOverview: React.FC<StatsOverviewProps> = ({ records }) => {
     let productiveCalls = 0;
 
     records.forEach((r) => {
-      Object.entries(r.brands).forEach(([bKey, bVal]) => {
-        const metric = bVal as BrandMetric;
+      Object.entries(r.brands || {}).forEach(([bKey, bVal]) => {
         if (bKey.toLowerCase().includes(brandNamePattern.toLowerCase())) {
-          salesValue += Number(metric.salesValue) || 0;
-          productiveCalls += Number(metric.productiveCall) || 0;
+          if (typeof bVal === 'number') {
+            salesValue += isNaN(bVal) ? 0 : bVal;
+          } else if (bVal && typeof bVal === 'object') {
+            salesValue += Number((bVal as any).salesValue) || 0;
+            productiveCalls += Number((bVal as any).productiveCall) || 0;
+          }
         }
       });
     });

@@ -61,6 +61,7 @@ interface DSRTableProps {
   onViewRawText: (record: DSRRecord) => void;
   onAddManualRecord: () => void;
   onDownloadExcel: () => void;
+  onClearSheet?: () => void;
   onFilteredRecordsChange?: (filtered: DSRRecord[]) => void;
   selectedDistributorFilter?: string;
   onDistributorFilterChange?: (distributor: string) => void;
@@ -75,6 +76,7 @@ export const DSRTable: React.FC<DSRTableProps> = ({
   onViewRawText,
   onAddManualRecord,
   onDownloadExcel,
+  onClearSheet,
   onFilteredRecordsChange,
   selectedDistributorFilter: controlledDistributorFilter,
   onDistributorFilterChange,
@@ -167,7 +169,11 @@ export const DSRTable: React.FC<DSRTableProps> = ({
         }
 
         if (selectedBrandFilter !== 'ALL') {
-          if (r.brands[selectedBrandFilter] === undefined) {
+          const filterLower = selectedBrandFilter.trim().toLowerCase();
+          const hasBrand = Object.keys(r.brands || {}).some(
+            (b) => b.trim().toLowerCase() === filterLower
+          );
+          if (!hasBrand) {
             return false;
           }
         }
@@ -477,15 +483,28 @@ export const DSRTable: React.FC<DSRTableProps> = ({
             </button>
           )}
 
-          {/* Add Manual Row (Admin Only) */}
+          {/* Add Manual Row & All Clear (Admin Only) */}
           {!isClientViewMode && (
-            <button
-              onClick={onAddManualRecord}
-              className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5 text-emerald-600" />
-              Add Row
-            </button>
+            <>
+              <button
+                onClick={onAddManualRecord}
+                className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-emerald-600" />
+                Add Row
+              </button>
+
+              {onClearSheet && (
+                <button
+                  onClick={onClearSheet}
+                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  title="Clear all records from data table"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  All Clear
+                </button>
+              )}
+            </>
           )}
 
           {/* Download Excel */}
@@ -666,14 +685,30 @@ export const DSRTable: React.FC<DSRTableProps> = ({
 
                     {/* Dynamic Brand Values */}
                     {uniqueBrands.map((brand, idx) => {
-                      const brandData = record.brands[brand];
-                      const salesVal = brandData ? brandData.salesValue : '-';
+                      let brandData: any = record.brands ? record.brands[brand] : undefined;
+                      if (brandData === undefined && record.brands) {
+                        const lowerB = brand.trim().toLowerCase();
+                        const foundKey = Object.keys(record.brands).find((k) => k.trim().toLowerCase() === lowerB);
+                        if (foundKey) brandData = record.brands[foundKey];
+                      }
+                      
+                      let salesVal: number | string = '-';
+                      if (typeof brandData === 'number') {
+                        salesVal = brandData;
+                      } else if (brandData && typeof brandData === 'object') {
+                        salesVal = brandData.salesValue ?? '-';
+                      }
+
                       const isEven = idx % 2 === 0;
                       const cellBg = isEven ? 'bg-emerald-50/20' : 'bg-blue-50/20';
 
                       return (
                         <td key={brand} className={`py-3 px-3 text-right border-x border-slate-100 font-mono ${cellBg} text-slate-900 font-semibold`}>
-                          {salesVal !== '-' ? Number(salesVal).toLocaleString('en-IN') : <span className="text-slate-300 font-normal">-</span>}
+                          {salesVal !== '-' && salesVal !== undefined && !isNaN(Number(salesVal)) ? (
+                            Number(salesVal).toLocaleString('en-IN')
+                          ) : (
+                            <span className="text-slate-300 font-normal">-</span>
+                          )}
                         </td>
                       );
                     })}

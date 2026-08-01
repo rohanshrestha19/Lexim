@@ -12,7 +12,8 @@ import {
   getDocs,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { DSRRecord } from '../types';
+import { DSRRecord, BrandMetric } from '../types';
+import { parseSingleMessage } from '../utils/dsrParser';
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const db = getFirestore(app);
@@ -56,30 +57,73 @@ export function subscribeDSRRecords(
   onData: (records: DSRRecord[]) => void,
   onError?: (err: any) => void
 ) {
-  const q = query(collection(db, COLLECTION_NAME), orderBy('createdAt', 'desc'));
+  // Query entire collection directly so missing fields or index issues never drop documents
+  const colRef = collection(db, COLLECTION_NAME);
 
   return onSnapshot(
-    q,
+    colRef,
     (snapshot) => {
       const records: DSRRecord[] = snapshot.docs.map((docSnap) => {
         const data = docSnap.data();
+        const rawBrands = data.brands || {};
+        let brandsMap: Record<string, BrandMetric> = {};
+
+        if (typeof rawBrands === 'object' && rawBrands !== null) {
+          Object.entries(rawBrands).forEach(([bName, val]: [string, any]) => {
+            if (bName && bName.trim()) {
+              const key = bName.trim();
+              if (typeof val === 'object' && val !== null) {
+                brandsMap[key] = {
+                  productiveCall: Number(val.productiveCall) || 0,
+                  salesValue: Number(val.salesValue) || 0,
+                };
+              } else {
+                brandsMap[key] = {
+                  productiveCall: 0,
+                  salesValue: Number(val) || 0,
+                };
+              }
+            }
+          });
+        }
+
+        const isEdited = Boolean(data.isEdited);
+        const rawText = data.rawText || '';
+
+        // Only auto-reparse rawText if the record was NOT manually edited AND brands is completely empty
+        if (!isEdited && Object.keys(brandsMap).length === 0 && rawText && rawText.length > 10) {
+          try {
+            const reParsed = parseSingleMessage(rawText, 0);
+            if (Object.keys(reParsed.brands).length > 0) {
+              brandsMap = reParsed.brands;
+            }
+          } catch (e) {
+            // fallback gracefully
+          }
+        }
+
         return {
           id: docSnap.id,
           date: data.date || '',
           day: data.day || '',
-          dsrName: data.dsrName,
+          dsrName: data.dsrName || '',
           distributorName: data.distributorName || '',
           beat: data.beat || '',
-          totalOutlet: data.totalOutlet ?? 0,
-          totalCall: data.totalCall ?? 0,
-          totalProductiveCall: data.totalProductiveCall ?? 0,
-          totalSalesValue: data.totalSalesValue ?? 0,
-          brands: data.brands || {},
-          rawText: data.rawText || '',
+          totalOutlet: Number(data.totalOutlet) || 0,
+          totalCall: Number(data.totalCall) || 0,
+          totalProductiveCall: Number(data.totalProductiveCall) || 0,
+          totalSalesValue: Number(data.totalSalesValue) || 0,
+          brands: brandsMap,
+          rawText,
           parseWarnings: data.parseWarnings || [],
-          createdAt: data.createdAt || Date.now(),
+          createdAt: typeof data.createdAt === 'number' && !isNaN(data.createdAt) ? data.createdAt : Date.now(),
+          isEdited,
         } as DSRRecord;
       });
+
+      // Sort in memory by createdAt descending
+      records.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+
       onData(records);
     },
     (error) => {
@@ -91,65 +135,84 @@ export function subscribeDSRRecords(
 }
 
 /**
+ * Clean and sanitize a DSRRecord object to guarantee no undefined or NaN values reach Firestore
+ */
+export function sanitizeRecordForFirestore(record: DSRRecord): Record<string, any> {
+  const cleanBrands: Record<string, { productiveCall: number; salesValue: number }> = {};
+  if (record.brands && typeof record.brands === 'object') {
+    Object.entries(record.brands).forEach(([bName, val]) => {
+      if (bName && bName.trim()) {
+        const key = bName.trim();
+        if (typeof val === 'object' && val !== null) {
+          const pc = Number((val as any).productiveCall);
+          const sv = Number((val as any).salesValue);
+          cleanBrands[key] = {
+            productiveCall: isNaN(pc) ? 0 : pc,
+            salesValue: isNaN(sv) ? 0 : sv,
+          };
+        } else if (typeof val === 'number') {
+          cleanBrands[key] = {
+            productiveCall: 0,
+            salesValue: isNaN(val) ? 0 : val,
+          };
+        } else {
+          cleanBrands[key] = { productiveCall: 0, salesValue: 0 };
+        }
+      }
+    });
+  }
+
+  const recordId = String(record.id || `dsr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+
+  return {
+    id: recordId,
+    date: String(record.date || ''),
+    day: String(record.day || ''),
+    dsrName: String(record.dsrName || ''),
+    distributorName: String(record.distributorName || ''),
+    beat: String(record.beat || ''),
+    totalOutlet: isNaN(Number(record.totalOutlet)) ? 0 : Number(record.totalOutlet),
+    totalCall: isNaN(Number(record.totalCall)) ? 0 : Number(record.totalCall),
+    totalProductiveCall: isNaN(Number(record.totalProductiveCall)) ? 0 : Number(record.totalProductiveCall),
+    totalSalesValue: isNaN(Number(record.totalSalesValue)) ? 0 : Number(record.totalSalesValue),
+    brands: cleanBrands,
+    rawText: String(record.rawText || ''),
+    parseWarnings: Array.isArray(record.parseWarnings) ? record.parseWarnings.map(String) : [],
+    createdAt: typeof record.createdAt === 'number' && !isNaN(record.createdAt) ? record.createdAt : Date.now(),
+    isEdited: Boolean(record.isEdited),
+  };
+}
+
+/**
  * Save or update a single DSR Record
  */
 export async function saveDSRRecordToDB(record: DSRRecord): Promise<void> {
-  const docRef = doc(db, COLLECTION_NAME, record.id);
-  const cleanRecord = {
-    id: record.id,
-    date: record.date || '',
-    day: record.day || '',
-    dsrName: record.dsrName || '',
-    distributorName: record.distributorName || '',
-    beat: record.beat || '',
-    totalOutlet: Number(record.totalOutlet) || 0,
-    totalCall: Number(record.totalCall) || 0,
-    totalProductiveCall: Number(record.totalProductiveCall) || 0,
-    totalSalesValue: Number(record.totalSalesValue) || 0,
-    brands: record.brands || {},
-    rawText: record.rawText || '',
-    parseWarnings: record.parseWarnings || [],
-    createdAt: record.createdAt || Date.now(),
-  };
-
+  const sanitized = sanitizeRecordForFirestore(record);
+  const docRef = doc(db, COLLECTION_NAME, sanitized.id);
   try {
-    await setDoc(docRef, cleanRecord, { merge: true });
+    await setDoc(docRef, sanitized, { merge: true });
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `${COLLECTION_NAME}/${record.id}`);
+    handleFirestoreError(err, OperationType.WRITE, `${COLLECTION_NAME}/${sanitized.id}`);
   }
 }
 
 /**
- * Batch save multiple DSR Records (e.g. from WhatsApp text parse or Google Sheet import)
+ * Batch save multiple DSR Records in chunks of max 400 operations to satisfy Firestore batch limits
  */
 export async function batchSaveDSRRecordsToDB(records: DSRRecord[]): Promise<void> {
   if (records.length === 0) return;
+  const CHUNK_SIZE = 400;
   try {
-    const batch = writeBatch(db);
-    records.forEach((record) => {
-      const docRef = doc(db, COLLECTION_NAME, record.id);
-      batch.set(
-        docRef,
-        {
-          id: record.id,
-          date: record.date || '',
-          day: record.day || '',
-          dsrName: record.dsrName || '',
-          distributorName: record.distributorName || '',
-          beat: record.beat || '',
-          totalOutlet: Number(record.totalOutlet) || 0,
-          totalCall: Number(record.totalCall) || 0,
-          totalProductiveCall: Number(record.totalProductiveCall) || 0,
-          totalSalesValue: Number(record.totalSalesValue) || 0,
-          brands: record.brands || {},
-          rawText: record.rawText || '',
-          parseWarnings: record.parseWarnings || [],
-          createdAt: record.createdAt || Date.now(),
-        },
-        { merge: true }
-      );
-    });
-    await batch.commit();
+    for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+      const chunk = records.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((record) => {
+        const sanitized = sanitizeRecordForFirestore(record);
+        const docRef = doc(db, COLLECTION_NAME, sanitized.id);
+        batch.set(docRef, sanitized, { merge: true });
+      });
+      await batch.commit();
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, COLLECTION_NAME);
   }
@@ -168,33 +231,42 @@ export async function deleteDSRRecordFromDB(id: string): Promise<void> {
 }
 
 /**
- * Bulk delete DSR Records
+ * Bulk delete DSR Records in chunks
  */
 export async function bulkDeleteDSRRecordsFromDB(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
+  const CHUNK_SIZE = 400;
   try {
-    const batch = writeBatch(db);
-    ids.forEach((id) => {
-      const docRef = doc(db, COLLECTION_NAME, id);
-      batch.delete(docRef);
-    });
-    await batch.commit();
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((id) => {
+        const docRef = doc(db, COLLECTION_NAME, id);
+        batch.delete(docRef);
+      });
+      await batch.commit();
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, COLLECTION_NAME);
   }
 }
 
 /**
- * Clear all DSR Records in database
+ * Clear all DSR Records in database in chunks
  */
 export async function clearAllDSRRecordsInDB(): Promise<void> {
   try {
     const snapshot = await getDocs(collection(db, COLLECTION_NAME));
-    const batch = writeBatch(db);
-    snapshot.docs.forEach((docSnap) => {
-      batch.delete(docSnap.ref);
-    });
-    await batch.commit();
+    if (snapshot.docs.length === 0) return;
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < snapshot.docs.length; i += CHUNK_SIZE) {
+      const chunk = snapshot.docs.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach((docSnap) => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
+    }
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, COLLECTION_NAME);
   }

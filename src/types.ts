@@ -30,6 +30,7 @@ export interface DSRRecord {
   rawText: string;
   parseWarnings: string[];
   createdAt: number;
+  isEdited?: boolean;
 }
 
 export interface ParseResult {
